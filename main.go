@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
+	"http"
 	"os"
 	"path"
 )
@@ -26,8 +26,8 @@ func usage() {
 func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
-			if e, ok := recover().(error); ok {
-				http.Error(w, e.Error(), http.StatusInternalServerError)
+			if e, ok := recover().(os.Error); ok {
+				http.Error(w, e.String(), http.StatusInternalServerError)
 				return
 			}
 		}()
@@ -44,17 +44,17 @@ func myFileServer(w http.ResponseWriter, r *http.Request, url string) {
 func uploadHandler(rw http.ResponseWriter, req *http.Request, url string) {
 	mr, err := req.MultipartReader()
 	if err != nil {
-		http.Error(rw, err.Error(), http.StatusInternalServerError)
+		http.Error(rw, err.String(), http.StatusInternalServerError)
 		return
 	}
 
 	for {
 		part, err := mr.NextPart()
-		if err == io.EOF {
+		if err == os.EOF {
 			break
 		}
 		if err != nil {
-			http.Error(rw, "reading body: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "reading body: " + err.String(), http.StatusInternalServerError)
 			return
 		}
 		fileName := part.FileName()
@@ -65,18 +65,18 @@ println("fileName: "+ fileName)
 		buf := bytes.NewBuffer(make([]byte, 0))
 		_, err = io.Copy(buf, part)
 		if err != nil {
-			http.Error(rw, "copying: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "copying: " + err.String(), http.StatusInternalServerError)
 			return
 		}
 		f, err := os.Create(path.Join(rootdir, fileName))
 		if err != nil {
-			http.Error(rw, "opening file: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "opening file: " + err.String(), http.StatusInternalServerError)
 			return
 		}
 		defer f.Close()
 		_, err = buf.WriteTo(f)
 		if err != nil {
-			http.Error(rw, "writing: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "writing: " + err.String(), http.StatusInternalServerError)
 			return
 		}
 		break
