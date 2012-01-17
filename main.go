@@ -88,7 +88,7 @@ func createUploadForm() {
 	contents := `
 <html>
 <head>
-  <titleUpload file</title>
+  <title>Upload file</title>
 </head>
 <body>
   <h1>Upload file</h1>
