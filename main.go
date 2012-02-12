@@ -61,7 +61,6 @@ func uploadHandler(rw http.ResponseWriter, req *http.Request, url string) {
 		if fileName == "" {
 			continue
 		}
-println("fileName: "+ fileName)
 		buf := bytes.NewBuffer(make([]byte, 0))
 		_, err = io.Copy(buf, part)
 		if err != nil {
@@ -79,13 +78,14 @@ println("fileName: "+ fileName)
 			http.Error(rw, "writing: " + err.Error(), http.StatusInternalServerError)
 			return
 		}
-		break
+		println(fileName + " uploaded")
 	}
 	http.ServeFile(rw, req, path.Join(rootdir, uploadform))
 }
 
 func createUploadForm() {
 	contents := `
+<!DOCTYPE html>
 <html>
 <head>
   <title>Upload file</title>

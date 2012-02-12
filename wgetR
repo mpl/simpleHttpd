@@ -1,0 +1,4 @@
+#!/bin/sh
+
+cd /home/user
+wget -r --no-parent -nH --reject "index.html*" `xclip -selection clipboard -o`
