@@ -2,17 +2,26 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
+	"log"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path"
+	"time"
 )
 
 const (
 	uploadform = "upload.html"
-	hostname = "foo"
 	selfKey = "key.pem"
 	selfCert = "cert.pem"
 )
@@ -127,16 +136,16 @@ func genSelfTLS() error {
 		return fmt.Errorf("failed to generate private key: %s", err)
 	}
 
-	now := time.Seconds()
+	now := time.Now()
 
 	template := x509.Certificate{
 		SerialNumber: new(big.Int).SetInt64(0),
 		Subject: pkix.Name{
-			CommonName:   hostname,
-			Organization: []string{hostname},
+			CommonName:   *host,
+			Organization: []string{*host},
 		},
-		NotBefore: time.SecondsToUTC(now - 300),
-		NotAfter:  time.SecondsToUTC(now + 60*60*24*365), // valid for 1 year.
+		NotBefore:    now.Add(-5 * time.Minute).UTC(),
+		NotAfter:     now.AddDate(1, 0, 0).UTC(),
 
 		SubjectKeyId: []byte{1, 2, 3, 4},
 		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
@@ -177,16 +186,43 @@ func main() {
 		usage()
 	}
 
+	listener, err := net.Listen("tcp", *host)
+	if err != nil {
+		log.Fatalf("Failed to listen on %s: %v", *host, err)
+	}
 	if *secure {
 		// always use self gen/signed creds
-		err := genSelfTLS
+		err := genSelfTLS()
 		if err != nil {
 			log.Fatal(err)
+		}
+		config := &tls.Config{
+			Rand:       rand.Reader,
+			Time:       time.Now,
+			NextProtos: []string{"http/1.1"},
+		}
+		config.Certificates = make([]tls.Certificate, 1)
+		config.Certificates[0], err = tls.LoadX509KeyPair(selfCert, selfKey)
+		if err != nil {
+			log.Fatalf("Failed to load TLS cert: %v", err)
+		}
+		listener = tls.NewListener(listener, config)
+		err = os.Remove(selfKey)
+		if err != nil {
+			log.Fatalf("Failed to remove TLS key: %v", err)
+		}
+		err = os.Remove(selfCert)
+		if err != nil {
+			log.Fatalf("Failed to remove TLS cert: %v", err)
 		}
 	}
 	createUploadForm()
 
 	http.HandleFunc("/upload", makeHandler(uploadHandler))
 	http.Handle("/", makeHandler(myFileServer))
-	http.ListenAndServe(*host, nil)
+//	http.ListenAndServe(*host, nil)
+	err = http.Serve(listener, nil)
+	if err != nil {
+		log.Fatalf("Error in http server: %v\n", err)
+	}
 }
