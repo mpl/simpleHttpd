@@ -22,14 +22,15 @@ import (
 
 const (
 	uploadform = "upload.html"
-	selfKey = "key.pem"
-	selfCert = "cert.pem"
+	selfKey    = "key.pem"
+	selfCert   = "cert.pem"
 )
 
 var (
 	host       = flag.String("host", "0.0.0.0:8080", "listening port and hostname")
 	help       = flag.Bool("h", false, "show this help")
-	secure       = flag.Bool("ssl", false, "for https")
+	secure     = flag.Bool("ssl", false, "for https")
+	upload     = flag.Bool("upload", false, "enable upload and automatically create upload.html")
 	rootdir, _ = os.Getwd()
 )
 
@@ -70,7 +71,7 @@ func uploadHandler(rw http.ResponseWriter, req *http.Request, url string) {
 			break
 		}
 		if err != nil {
-			http.Error(rw, "reading body: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "reading body: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		fileName := part.FileName()
@@ -80,18 +81,18 @@ func uploadHandler(rw http.ResponseWriter, req *http.Request, url string) {
 		buf := bytes.NewBuffer(make([]byte, 0))
 		_, err = io.Copy(buf, part)
 		if err != nil {
-			http.Error(rw, "copying: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "copying: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		f, err := os.Create(path.Join(rootdir, fileName))
 		if err != nil {
-			http.Error(rw, "opening file: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "opening file: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		defer f.Close()
 		_, err = buf.WriteTo(f)
 		if err != nil {
-			http.Error(rw, "writing: " + err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "writing: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		println(fileName + " uploaded")
@@ -144,8 +145,8 @@ func genSelfTLS() error {
 			CommonName:   *host,
 			Organization: []string{*host},
 		},
-		NotBefore:    now.Add(-5 * time.Minute).UTC(),
-		NotAfter:     now.AddDate(1, 0, 0).UTC(),
+		NotBefore: now.Add(-5 * time.Minute).UTC(),
+		NotAfter:  now.AddDate(1, 0, 0).UTC(),
 
 		SubjectKeyId: []byte{1, 2, 3, 4},
 		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
@@ -216,11 +217,13 @@ func main() {
 			log.Fatalf("Failed to remove TLS cert: %v", err)
 		}
 	}
-	createUploadForm()
 
-	http.HandleFunc("/upload", makeHandler(uploadHandler))
+	if *upload {
+		createUploadForm()
+		http.HandleFunc("/upload", makeHandler(uploadHandler))
+	}
 	http.Handle("/", makeHandler(myFileServer))
-//	http.ListenAndServe(*host, nil)
+	// http.ListenAndServe(*host, nil)
 	err = http.Serve(listener, nil)
 	if err != nil {
 		log.Fatalf("Error in http server: %v\n", err)
