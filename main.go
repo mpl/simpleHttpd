@@ -26,8 +26,6 @@ import (
 
 const (
 	uploadform = "upload.html"
-	selfKey    = "key.pem"
-	selfCert   = "cert.pem"
 	idstring   = "http://golang.org/pkg/http/#ListenAndServe"
 )
 
@@ -35,7 +33,7 @@ var (
 	host     = flag.String("host", "0.0.0.0:8080", "listening port and hostname")
 	help     = flag.Bool("h", false, "show this help")
 	userpass = flag.String("userpass", "", "optional username:password protection")
-	secure   = flag.Bool("ssl", false, "for https")
+	secure   = flag.Bool("ssl", false, `For https. If "key.pem" or "cert.pem" are not found in $HOME/keys/, in-memory self-signed are generated and used instead.`)
 	upload   = flag.Bool("upload", false, "enable upload and automatically create upload.html")
 )
 
@@ -44,6 +42,8 @@ var (
 	kBasicAuthPattern = regexp.MustCompile(`^Basic ([a-zA-Z0-9\+/=]+)`)
 	username          string
 	password          string
+	selfKey           = filepath.Join(os.Getenv("HOME"), "keys", "key.pem")
+	selfCert          = filepath.Join(os.Getenv("HOME"), "keys", "cert.pem")
 )
 
 func usage() {
@@ -211,7 +211,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, fs http.FileSystem, name 
 }
 
 func myFileServer(w http.ResponseWriter, r *http.Request, url string) {
-//	http.ServeFile(w, r, path.Join(rootdir, url))
+	//	http.ServeFile(w, r, path.Join(rootdir, url))
 	dir, file := filepath.Split(filepath.Join(rootdir, url))
 	serveFile(w, r, http.Dir(dir), file)
 }
@@ -289,7 +289,7 @@ func createUploadForm() {
 	}
 }
 
-func genSelfTLS() error {
+func genSelfTLS(certOut, keyOut io.Writer) error {
 	priv, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		return fmt.Errorf("failed to generate private key: %s", err)
@@ -315,21 +315,9 @@ func genSelfTLS() error {
 		return fmt.Errorf("Failed to create certificate: %s", err)
 	}
 
-	certOut, err := os.Create(selfCert)
-	if err != nil {
-		return fmt.Errorf("failed to open %s for writing: %s", selfCert, err)
-	}
 	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	certOut.Close()
-	log.Printf("written %s\n", selfCert)
-
-	keyOut, err := os.OpenFile(selfKey, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to open %s for writing:", selfKey, err)
-	}
 	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-	keyOut.Close()
-	log.Printf("written %s\n", selfKey)
+	log.Println("self-signed cert and key generated")
 	return nil
 }
 
@@ -365,30 +353,32 @@ func main() {
 	initUserPass()
 
 	if *secure {
-		// always use self gen/signed creds
-		err := genSelfTLS()
-		if err != nil {
-			log.Fatal(err)
+		_, statErr1 := os.Stat(selfCert)
+		_, statErr2 := os.Stat(selfKey)
+		var cert tls.Certificate
+		if statErr1 == nil && statErr2 == nil {
+			cert, err = tls.LoadX509KeyPair(selfCert, selfKey)
+		} else {
+			// generate in-memory certs
+			var certMem, keyMem bytes.Buffer
+			err = genSelfTLS(&certMem, &keyMem)
+			if err != nil {
+				log.Fatal(err)
+			}
+			cert, err = tls.X509KeyPair(certMem.Bytes(), keyMem.Bytes())
 		}
+		if err != nil {
+			log.Fatalf("Failed to load TLS cert: %v", err)
+		}
+
 		config := &tls.Config{
 			Rand:       rand.Reader,
 			Time:       time.Now,
 			NextProtos: []string{"http/1.1"},
 		}
 		config.Certificates = make([]tls.Certificate, 1)
-		config.Certificates[0], err = tls.LoadX509KeyPair(selfCert, selfKey)
-		if err != nil {
-			log.Fatalf("Failed to load TLS cert: %v", err)
-		}
+		config.Certificates[0] = cert
 		listener = tls.NewListener(listener, config)
-		err = os.Remove(selfKey)
-		if err != nil {
-			log.Fatalf("Failed to remove TLS key: %v", err)
-		}
-		err = os.Remove(selfCert)
-		if err != nil {
-			log.Fatalf("Failed to remove TLS cert: %v", err)
-		}
 	}
 
 	if *upload {
