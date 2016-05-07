@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -18,10 +17,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/mpl/basicauth"
 )
 
 const (
@@ -32,16 +32,14 @@ const (
 var (
 	host     = flag.String("host", "0.0.0.0:8080", "listening port and hostname")
 	help     = flag.Bool("h", false, "show this help")
-	userpass = flag.String("userpass", "", "optional username:password protection")
-	secure   = flag.Bool("ssl", false, `For https. If "key.pem" or "cert.pem" are not found in $HOME/keys/, in-memory self-signed are generated and used instead.`)
+	flagUserpass = flag.String("userpass", "", "optional username:password protection")
+	flagTLS   = flag.Bool("tls", false, `For https. If "key.pem" or "cert.pem" are not found in $HOME/keys/, in-memory self-signed are generated and used instead.`)
 	upload   = flag.Bool("upload", false, "enable upload and automatically create upload.html")
 )
 
 var (
 	rootdir, _        = os.Getwd()
-	kBasicAuthPattern = regexp.MustCompile(`^Basic ([a-zA-Z0-9\+/=]+)`)
-	username          string
-	password          string
+	up *basicauth.UserPass
 	selfKey           = filepath.Join(os.Getenv("HOME"), "keys", "key.pem")
 	selfCert          = filepath.Join(os.Getenv("HOME"), "keys", "cert.pem")
 )
@@ -65,50 +63,16 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.Handl
 		if isAllowed(r) {
 			fn(w, r, title)
 		} else {
-			sendUnauthorized(w, r)
+			basicauth.SendUnauthorized(w, r, "simpleHttpd")
 		}
 	}
 }
 
-func basicAuth(req *http.Request) (string, string, error) {
-	auth := req.Header.Get("Authorization")
-	if auth == "" {
-		return "", "", fmt.Errorf("Missing \"Authorization\" in header")
-	}
-	matches := kBasicAuthPattern.FindStringSubmatch(auth)
-	if len(matches) != 2 {
-		return "", "", fmt.Errorf("Bogus Authorization header")
-	}
-	encoded := matches[1]
-	enc := base64.StdEncoding
-	decBuf := make([]byte, enc.DecodedLen(len(encoded)))
-	n, err := enc.Decode(decBuf, []byte(encoded))
-	if err != nil {
-		return "", "", err
-	}
-	pieces := strings.SplitN(string(decBuf[0:n]), ":", 2)
-	if len(pieces) != 2 {
-		return "", "", fmt.Errorf("didn't get two pieces")
-	}
-	return pieces[0], pieces[1], nil
-}
-
-func isAllowed(req *http.Request) bool {
-	if *userpass == "" {
+func isAllowed(r *http.Request) bool {
+	if *flagUserpass == "" {
 		return true
 	}
-	user, pass, err := basicAuth(req)
-	if err != nil {
-		return false
-	}
-	return user == username && pass == password
-}
-
-func sendUnauthorized(rw http.ResponseWriter, req *http.Request) {
-	realm := "simpleHttpd"
-	rw.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%q", realm))
-	rw.WriteHeader(http.StatusUnauthorized)
-	fmt.Fprintf(rw, "<html><body><h1>Unauthorized</h1>")
+	return up.IsAllowed(r)
 }
 
 type sortedFiles []os.FileInfo
@@ -163,6 +127,7 @@ func checkLastModified(w http.ResponseWriter, r *http.Request, modtime time.Time
 	return false
 }
 
+// copied from stdlib, and modified to server sorted listing
 // name is '/'-separated, not filepath.Separator.
 func serveFile(w http.ResponseWriter, r *http.Request, fs http.FileSystem, name string) {
 	const indexPage = "/index.html"
@@ -211,7 +176,6 @@ func serveFile(w http.ResponseWriter, r *http.Request, fs http.FileSystem, name 
 }
 
 func myFileServer(w http.ResponseWriter, r *http.Request, url string) {
-	//	http.ServeFile(w, r, path.Join(rootdir, url))
 	dir, file := filepath.Split(filepath.Join(rootdir, url))
 	serveFile(w, r, http.Dir(dir), file)
 }
@@ -322,15 +286,14 @@ func genSelfTLS(certOut, keyOut io.Writer) error {
 }
 
 func initUserPass() {
-	if *userpass == "" {
+	if *flagUserpass == "" {
 		return
 	}
-	pieces := strings.Split(*userpass, ":")
-	if len(pieces) < 2 {
-		log.Fatalf("Wrong userpass auth string; needs to be \"username:password\"")
+	var err error
+	up, err = basicauth.New(*flagUserpass)
+	if err != nil {
+		log.Fatal(err)
 	}
-	username = pieces[0]
-	password = pieces[1]
 }
 
 func main() {
@@ -352,7 +315,7 @@ func main() {
 
 	initUserPass()
 
-	if *secure {
+	if *flagTLS {
 		_, statErr1 := os.Stat(selfCert)
 		_, statErr2 := os.Stat(selfKey)
 		var cert tls.Certificate
@@ -386,9 +349,7 @@ func main() {
 		http.HandleFunc("/upload", makeHandler(uploadHandler))
 	}
 	http.Handle("/", makeHandler(myFileServer))
-	// http.ListenAndServe(*host, nil)
-	err = http.Serve(listener, nil)
-	if err != nil {
+	if err = http.Serve(listener, nil); err != nil {
 		log.Fatalf("Error in http server: %v\n", err)
 	}
 }
