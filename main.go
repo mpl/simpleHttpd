@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"math/big"
@@ -30,18 +31,19 @@ const (
 )
 
 var (
-	host     = flag.String("host", "0.0.0.0:8080", "listening port and hostname")
-	help     = flag.Bool("h", false, "show this help")
+	host         = flag.String("host", "0.0.0.0:8080", "listening port and hostname")
+	help         = flag.Bool("h", false, "show this help")
 	flagUserpass = flag.String("userpass", "", "optional username:password protection")
-	flagTLS   = flag.Bool("tls", false, `For https. If "key.pem" or "cert.pem" are not found in $HOME/keys/, in-memory self-signed are generated and used instead.`)
-	upload   = flag.Bool("upload", false, "enable upload and automatically create upload.html")
+	flagTLS      = flag.Bool("tls", false, `For https. If "key.pem" or "cert.pem" are not found in $HOME/keys/, in-memory self-signed are generated and used instead.`)
+	upload       = flag.Bool("upload", false, "enable uploading at /upload")
 )
 
 var (
-	rootdir, _        = os.Getwd()
-	up *basicauth.UserPass
-	selfKey           = filepath.Join(os.Getenv("HOME"), "keys", "key.pem")
-	selfCert          = filepath.Join(os.Getenv("HOME"), "keys", "cert.pem")
+	rootdir, _ = os.Getwd()
+	up         *basicauth.UserPass
+	selfKey    = filepath.Join(os.Getenv("HOME"), "keys", "key.pem")
+	selfCert   = filepath.Join(os.Getenv("HOME"), "keys", "cert.pem")
+	uploadTmpl *template.Template
 )
 
 func usage() {
@@ -181,6 +183,13 @@ func myFileServer(w http.ResponseWriter, r *http.Request, url string) {
 }
 
 func uploadHandler(rw http.ResponseWriter, req *http.Request, url string) {
+	if req.Method == "GET" {
+		if err := uploadTmpl.Execute(rw, nil); err != nil {
+			log.Printf("template error: %v", err)
+		}
+		return
+	}
+
 	mr, err := req.MultipartReader()
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
@@ -219,18 +228,19 @@ func uploadHandler(rw http.ResponseWriter, req *http.Request, url string) {
 		}
 		println(fileName + " uploaded")
 	}
-	http.ServeFile(rw, req, filepath.Join(rootdir, uploadform))
+	if err := uploadTmpl.Execute(rw, nil); err != nil {
+		log.Printf("template error: %v", err)
+	}
 }
 
-func createUploadForm() {
-	contents := `
+var uploadHTML = `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Upload file</title>
+  <title>Upload files</title>
 </head>
 <body>
-  <h1>Upload file</h1>
+  <h1>Upload files</h1>
 
   <form action="/upload" method="POST" id="uploadform" enctype="multipart/form-data">
     <input type="file" id="fileinput" multiple="true" name="file">
@@ -240,18 +250,6 @@ func createUploadForm() {
 </body>
 </html>
 `
-	f, err := os.Create(filepath.Join(rootdir, uploadform))
-	if err != nil {
-		println("err creating uploadform")
-		os.Exit(2)
-	}
-	defer f.Close()
-	_, err = f.Write([]byte(contents))
-	if err != nil {
-		println("err writing uploadform")
-		os.Exit(2)
-	}
-}
 
 func genSelfTLS(certOut, keyOut io.Writer) error {
 	priv, err := rsa.GenerateKey(rand.Reader, 1024)
@@ -345,7 +343,7 @@ func main() {
 	}
 
 	if *upload {
-		createUploadForm()
+		uploadTmpl = template.Must(template.New("upload").Parse(uploadHTML))
 		http.HandleFunc("/upload", makeHandler(uploadHandler))
 	}
 	http.Handle("/", makeHandler(myFileServer))
