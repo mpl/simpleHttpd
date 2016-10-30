@@ -47,6 +47,7 @@ var (
 	up         *basicauth.UserPass
 	tlsKey     = filepath.Join(os.Getenv("HOME"), "keys", "key.pem")
 	tlsCert    = filepath.Join(os.Getenv("HOME"), "keys", "cert.pem")
+	certCache  = filepath.Join(os.Getenv("HOME"), "keys", "letsencrypt.cache")
 	uploadTmpl *template.Template
 )
 
@@ -311,7 +312,7 @@ func setupTLS() (*tls.Config, error) {
 		m := autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
 			HostPolicy: autocert.HostWhitelist(hostname),
-			Cache:      autocert.DirCache(filepath.Join(os.Getenv("HOME"), "keys", "letsencrypt.cache")),
+			Cache:      autocert.DirCache(certCache),
 		}
 		return &tls.Config{
 			GetCertificate: m.GetCertificate,
