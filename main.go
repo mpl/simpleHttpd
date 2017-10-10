@@ -31,7 +31,8 @@ var (
 	help         = flag.Bool("h", false, "show this help")
 	flagUserpass = flag.String("userpass", "", "optional username:password protection")
 	flagTLS      = flag.Bool("tls", false, `For https. Uses autocert, or "key.pem" and "cert.pem" in $HOME/keys/`)
-	upload       = flag.Bool("upload", false, "enable uploading at /upload")
+	flagUpload   = flag.Bool("upload", false, "enable uploading at /upload")
+	flagGoPath   = flag.String("gopath", "", "also serve imports from the given GOPATH. Takes precedence over files in the root.")
 )
 
 var (
@@ -172,6 +173,35 @@ func serveFile(w http.ResponseWriter, r *http.Request, fs http.FileSystem, name 
 }
 
 func myFileServer(w http.ResponseWriter, r *http.Request, url string) {
+	if serveFromGopath(w, r, url) {
+		return
+	}
+	serveFromRoot(w, r, url)
+}
+
+func serveFromGopath(w http.ResponseWriter, r *http.Request, url string) bool {
+	if strings.TrimSuffix(url, "/") == "" {
+		return false
+	}
+
+	if *flagGoPath == "" {
+		return false
+	}
+
+	fullPath := filepath.Join(*flagGoPath, "src", url)
+	if _, err := os.Stat(fullPath); err != nil {
+		if !os.IsNotExist(err) {
+			log.Print(err)
+		}
+		return false
+	}
+
+	dir, file := filepath.Split(fullPath)
+	serveFile(w, r, http.Dir(dir), file)
+	return true
+}
+
+func serveFromRoot(w http.ResponseWriter, r *http.Request, url string) {
 	dir, file := filepath.Split(filepath.Join(rootdir, url))
 	serveFile(w, r, http.Dir(dir), file)
 }
@@ -319,7 +349,7 @@ func main() {
 		log.Fatalf("Failed to listen on %s: %v", *host, err)
 	}
 
-	if *upload {
+	if *flagUpload {
 		uploadTmpl = template.Must(template.New("upload").Parse(uploadHTML))
 		http.HandleFunc("/upload", makeHandler(uploadHandler))
 	}
