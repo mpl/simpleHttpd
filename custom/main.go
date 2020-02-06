@@ -362,6 +362,9 @@ func main() {
 		}
 		// TODO: use makeHandler
 		http.HandleFunc(parts[0], func(w http.ResponseWriter, r *http.Request) {
+			// header := w.Header()
+			// header["Content-Type"] = nil
+			// header["Content-Length"] = []string{"3"}
 			http.Redirect(w, r, parts[1], 302)
 		})
 	}
