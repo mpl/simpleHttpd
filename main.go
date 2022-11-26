@@ -334,10 +334,6 @@ func main() {
 
 	initUserPass()
 
-	if !*flagTLS && *simpletls.FlagAutocert {
-		*flagTLS = true
-	}
-
 	var err error
 	var listener net.Listener
 	if *flagTLS {
